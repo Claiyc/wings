@@ -117,7 +117,22 @@ func (dockerInstaller) Run(s *Server, script *remote.InstallationScript) error {
 	if err != nil {
 		return err
 	}
-	return p.Run()
+	// internalInstall already holds the installation lock.
+	return p.run()
+}
+
+// lockInstallation takes the installation lock and cancels the server's SFTP
+// sessions. The returned function releases the lock.
+func (s *Server) lockInstallation() (func(), error) {
+	s.Log().Debug("acquiring installation process lock")
+	if !s.installing.SwapIf(true) {
+		return nil, errors.New("install: cannot obtain installation lock")
+	}
+	s.Sftp().CancelAll()
+	return func() {
+		s.Log().Debug("releasing installation process lock")
+		s.installing.Store(false)
+	}, nil
 }
 
 // Internal installation function used to simplify reporting back to the Panel.
@@ -127,18 +142,13 @@ func (s *Server) internalInstall() error {
 		return err
 	}
 
-	s.Log().Debug("acquiring installation process lock")
-	if !s.installing.SwapIf(true) {
-		return errors.New("install: cannot obtain installation lock")
+	// Take an exclusive lock on this installation process and release it once the process has
+	// finished, so that other processes can be executed without encountering a wait timeout.
+	unlock, err := s.lockInstallation()
+	if err != nil {
+		return err
 	}
-	s.Sftp().CancelAll()
-	// We now have an exclusive lock on this installation process. Ensure that whenever this
-	// process is finished that the semaphore is released so that other processes and be executed
-	// without encountering a wait timeout.
-	defer func() {
-		s.Log().Debug("releasing installation process lock")
-		s.installing.Store(false)
-	}()
+	defer unlock()
 
 	var installer Installer = dockerInstaller{}
 	if s.installer != nil {
@@ -233,9 +243,17 @@ func (ip *InstallationProcess) RemoveContainer() error {
 // This will configure the required environment, and then spin up the
 // installation container. Once the container finishes installing the results
 // are stored in an installation log in the server's configuration directory.
-//
-// The caller must hold the server's installation lock (see Server.Install).
 func (ip *InstallationProcess) Run() error {
+	unlock, err := ip.Server.lockInstallation()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return ip.run()
+}
+
+// run is Run for callers that already hold the installation lock.
+func (ip *InstallationProcess) run() error {
 	if err := ip.BeforeExecute(); err != nil {
 		return err
 	}

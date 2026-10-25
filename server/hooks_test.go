@@ -211,3 +211,41 @@ func TestSyncWithEnvironmentConfiguresImageAndStop(t *testing.T) {
 		t.Fatalf("environment stop configuration = %+v, expected the server's", env.stop)
 	}
 }
+
+func TestInstallationProcessRunTakesLock(t *testing.T) {
+	s, err := New(nil)
+	if err != nil {
+		t.Fatalf("New() returned unexpected error: %v", err)
+	}
+	s.installing.Store(true)
+
+	ip := &InstallationProcess{Server: s}
+	if err := ip.Run(); err == nil {
+		t.Fatal("Run() returned nil while another install held the lock")
+	}
+	if !s.IsInstalling() {
+		t.Fatal("Run() released a lock it did not hold")
+	}
+}
+
+func TestLockInstallationReleases(t *testing.T) {
+	s, err := New(nil)
+	if err != nil {
+		t.Fatalf("New() returned unexpected error: %v", err)
+	}
+
+	unlock, err := s.lockInstallation()
+	if err != nil {
+		t.Fatalf("lockInstallation() returned unexpected error: %v", err)
+	}
+	if !s.IsInstalling() {
+		t.Fatal("IsInstalling() is false while the lock is held")
+	}
+	if _, err := s.lockInstallation(); err == nil {
+		t.Fatal("lockInstallation() succeeded twice")
+	}
+	unlock()
+	if s.IsInstalling() {
+		t.Fatal("IsInstalling() is true after unlock")
+	}
+}
