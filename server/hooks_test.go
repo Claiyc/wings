@@ -71,6 +71,9 @@ func hookServerSettings(uuid string) json.RawMessage {
 	return json.RawMessage(`{"uuid":"` + uuid + `","allocations":{"default":{"ip":"0.0.0.0","port":25565}}}`)
 }
 
+// TestInternalInstallRunsInstallerUnderLock checks that internalInstall passes the
+// Panel's script to the configured installer, holds the installation lock while
+// it runs and releases the lock afterwards.
 func TestInternalInstallRunsInstallerUnderLock(t *testing.T) {
 	client := &hookClient{script: remote.InstallationScript{ContainerImage: "installer:latest"}}
 	s, err := New(client)
@@ -97,6 +100,8 @@ func TestInternalInstallRunsInstallerUnderLock(t *testing.T) {
 	}
 }
 
+// TestInternalInstallReturnsInstallerError checks that an installer error is
+// returned and the installation lock is still released.
 func TestInternalInstallReturnsInstallerError(t *testing.T) {
 	s, err := New(&hookClient{})
 	if err != nil {
@@ -113,6 +118,8 @@ func TestInternalInstallReturnsInstallerError(t *testing.T) {
 	}
 }
 
+// TestInternalInstallRefusesWhileInstalling checks that internalInstall does not
+// call the installer while another installation holds the lock.
 func TestInternalInstallRefusesWhileInstalling(t *testing.T) {
 	s, err := New(&hookClient{})
 	if err != nil {
@@ -130,6 +137,8 @@ func TestInternalInstallRefusesWhileInstalling(t *testing.T) {
 	}
 }
 
+// TestInitServerUsesManagerHooks checks that InitServer builds the environment
+// through the manager's factory and hands the manager's installer to the server.
 func TestInitServerUsesManagerHooks(t *testing.T) {
 	setHookConfig(t)
 
@@ -163,6 +172,8 @@ func TestInitServerUsesManagerHooks(t *testing.T) {
 	}
 }
 
+// TestInitServerFactoryError checks that InitServer returns the error of the
+// environment factory.
 func TestInitServerFactoryError(t *testing.T) {
 	setHookConfig(t)
 
@@ -181,6 +192,9 @@ func TestInitServerFactoryError(t *testing.T) {
 	}
 }
 
+// TestSyncWithEnvironmentConfiguresImageAndStop checks that
+// SyncWithEnvironment passes the image and stop configuration to an
+// environment implementing ImageAndStopConfigurable.
 func TestSyncWithEnvironmentConfiguresImageAndStop(t *testing.T) {
 	setHookConfig(t)
 
@@ -212,6 +226,8 @@ func TestSyncWithEnvironmentConfiguresImageAndStop(t *testing.T) {
 	}
 }
 
+// TestInstallationProcessRunTakesLock checks that InstallationProcess.Run
+// takes the installation lock itself and leaves a lock held by someone else alone.
 func TestInstallationProcessRunTakesLock(t *testing.T) {
 	s, err := New(nil)
 	if err != nil {
@@ -228,6 +244,8 @@ func TestInstallationProcessRunTakesLock(t *testing.T) {
 	}
 }
 
+// TestLockInstallationReleases checks that lockInstallation is exclusive and
+// that its release function frees the lock.
 func TestLockInstallationReleases(t *testing.T) {
 	s, err := New(nil)
 	if err != nil {

@@ -112,6 +112,8 @@ type Installer interface {
 // a Docker container using InstallationProcess.
 type dockerInstaller struct{}
 
+// Run runs the installation script in a Docker container and blocks until it
+// has finished.
 func (dockerInstaller) Run(s *Server, script *remote.InstallationScript) error {
 	p, err := NewInstallationProcess(s, script)
 	if err != nil {
