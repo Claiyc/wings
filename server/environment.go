@@ -34,3 +34,10 @@ type ImageAndStopConfigurable interface {
 type Attachable interface {
 	IsAttached() bool
 }
+
+// The Docker environment must keep satisfying the optional interfaces, as the
+// type assertions on them would otherwise silently stop matching.
+var (
+	_ ImageAndStopConfigurable = (*docker.Environment)(nil)
+	_ Attachable               = (*docker.Environment)(nil)
+)
