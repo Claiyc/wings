@@ -91,7 +91,7 @@ func newExistingTransferRouter(t *testing.T, state string, opts ...wserver.Manag
 		return env, nil
 	}))
 	m := wserver.NewEmptyManager(client, opts...)
-	s, err := m.InitServer(remote.ServerConfigurationResponse{
+	s, err := m.InitServer(transferTestServer, remote.ServerConfigurationResponse{
 		Settings:             json.RawMessage(`{"uuid":"` + transferTestServer + `","allocations":{"default":{"ip":"127.0.0.1","port":25565}}}`),
 		ProcessConfiguration: &remote.ProcessConfiguration{},
 	})

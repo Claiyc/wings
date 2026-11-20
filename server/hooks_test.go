@@ -143,7 +143,7 @@ func TestInitServerUsesManagerHooks(t *testing.T) {
 	}
 	m := NewEmptyManager(nil, WithEnvironmentFactory(factory), WithInstaller(installer))
 
-	s, err := m.InitServer(remote.ServerConfigurationResponse{
+	s, err := m.InitServer("2d9b0c7e-0000-4000-8000-000000000000", remote.ServerConfigurationResponse{
 		Settings:             hookServerSettings("2d9b0c7e-0000-4000-8000-000000000000"),
 		ProcessConfiguration: &remote.ProcessConfiguration{},
 	})
@@ -172,7 +172,7 @@ func TestInitServerFactoryError(t *testing.T) {
 	}
 	m := NewEmptyManager(nil, WithEnvironmentFactory(factory))
 
-	_, err := m.InitServer(remote.ServerConfigurationResponse{
+	_, err := m.InitServer("2d9b0c7e-0000-4000-8000-000000000001", remote.ServerConfigurationResponse{
 		Settings:             hookServerSettings("2d9b0c7e-0000-4000-8000-000000000001"),
 		ProcessConfiguration: &remote.ProcessConfiguration{},
 	})
@@ -190,7 +190,7 @@ func TestSyncWithEnvironmentConfiguresImageAndStop(t *testing.T) {
 		return env, nil
 	}
 	m := NewEmptyManager(nil, WithEnvironmentFactory(factory))
-	s, err := m.InitServer(remote.ServerConfigurationResponse{
+	s, err := m.InitServer("2d9b0c7e-0000-4000-8000-000000000002", remote.ServerConfigurationResponse{
 		Settings: hookServerSettings("2d9b0c7e-0000-4000-8000-000000000002"),
 		ProcessConfiguration: &remote.ProcessConfiguration{
 			Stop: remote.ProcessStopConfiguration{Type: remote.ProcessStopCommand, Value: "stop"},
