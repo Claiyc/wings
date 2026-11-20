@@ -71,22 +71,32 @@ func (s *Server) LockForIncomingTransfer() (release func(), err error) {
 	if err := s.powerLock.Acquire(); err != nil {
 		return nil, errors.Wrap(err, "server: a power action is in progress")
 	}
-	switch {
-	case s.IsInstalling():
-		err = ErrServerIsInstalling
-	case s.IsRestoring():
-		err = ErrServerIsRestoring
-	case s.IsTransferring():
-		err = ErrServerIsTransferring
-	case s.Environment == nil || s.Environment.State() != environment.ProcessOfflineState:
+	if s.Environment == nil || s.Environment.State() != environment.ProcessOfflineState {
 		err = ErrIsRunning
+	}
+	// StartTransferring checks and sets the lifecycle flags together, so an
+	// install or restore cannot start between the check and the mark.
+	if err == nil && !s.StartTransferring() {
+		err = s.lifecycleError()
 	}
 	if err != nil {
 		s.powerLock.Release()
 		return nil, err
 	}
-	s.SetTransferring(true)
 	return s.powerLock.Release, nil
+}
+
+// lifecycleError returns the error for the lifecycle operation (install,
+// restore or transfer) the server is busy with.
+func (s *Server) lifecycleError() error {
+	switch {
+	case s.IsInstalling():
+		return ErrServerIsInstalling
+	case s.IsRestoring():
+		return ErrServerIsRestoring
+	default:
+		return ErrServerIsTransferring
+	}
 }
 
 // HandlePowerAction is a helper function that can receive a power action and then process the

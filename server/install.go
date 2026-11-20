@@ -145,19 +145,6 @@ func (s *Server) internalInstall() error {
 		return err
 	}
 
-	s.Log().Debug("acquiring installation process lock")
-	if !s.installing.SwapIf(true) {
-		return errors.New("install: cannot obtain installation lock")
-	}
-	s.Sftp().CancelAll()
-	// We now have an exclusive lock on this installation process. Ensure that whenever this
-	// process is finished that the semaphore is released so that other processes and be executed
-	// without encountering a wait timeout.
-	defer func() {
-		s.Log().Debug("releasing installation process lock")
-		s.installing.Store(false)
-	}()
-
 	var installer Installer = dockerInstaller{}
 	if s.installer != nil {
 		installer = s.installer

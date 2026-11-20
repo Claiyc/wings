@@ -23,6 +23,17 @@ func (c *hookClient) GetInstallationScript(context.Context, string) (remote.Inst
 	return c.script, nil
 }
 
+// hookStatusClient also records the installation results sent to the Panel.
+type hookStatusClient struct {
+	hookClient
+	statuses []remote.InstallStatusRequest
+}
+
+func (c *hookStatusClient) SetInstallationStatus(_ context.Context, _ string, r remote.InstallStatusRequest) error {
+	c.statuses = append(c.statuses, r)
+	return nil
+}
+
 // hookInstaller records how it was called and returns err.
 type hookInstaller struct {
 	err        error
@@ -54,6 +65,7 @@ func (e *hookEnvironment) Events() *events.Bus                { return e.bus }
 func (e *hookEnvironment) SetLogCallback(func([]byte))        {}
 func (e *hookEnvironment) InSituUpdate() error                { return nil }
 func (e *hookEnvironment) SetImage(i string)                  { e.image = i }
+func (e *hookEnvironment) SetState(string)                    {}
 func (e *hookEnvironment) SetStopConfiguration(c remote.ProcessStopConfiguration) {
 	e.stop = c
 }
@@ -71,17 +83,18 @@ func hookServerSettings(uuid string) json.RawMessage {
 	return json.RawMessage(`{"uuid":"` + uuid + `","allocations":{"default":{"ip":"0.0.0.0","port":25565}}}`)
 }
 
-func TestInternalInstallRunsInstallerUnderLock(t *testing.T) {
-	client := &hookClient{script: remote.InstallationScript{ContainerImage: "installer:latest"}}
+func TestInstallRunsInstallerUnderLock(t *testing.T) {
+	client := &hookStatusClient{hookClient: hookClient{script: remote.InstallationScript{ContainerImage: "installer:latest"}}}
 	s, err := New(client)
 	if err != nil {
 		t.Fatalf("New() returned unexpected error: %v", err)
 	}
+	s.Environment = &hookEnvironment{bus: events.NewBus()}
 	installer := &hookInstaller{}
 	s.installer = installer
 
-	if err := s.internalInstall(); err != nil {
-		t.Fatalf("internalInstall() returned unexpected error: %v", err)
+	if err := s.Install(); err != nil {
+		t.Fatalf("Install() returned unexpected error: %v", err)
 	}
 	if installer.calls != 1 {
 		t.Fatalf("installer called %d times, expected 1", installer.calls)
@@ -93,7 +106,10 @@ func TestInternalInstallRunsInstallerUnderLock(t *testing.T) {
 		t.Fatal("installer ran without the installation lock held")
 	}
 	if s.IsInstalling() {
-		t.Fatal("installation lock still held after internalInstall() returned")
+		t.Fatal("installation lock still held after Install() returned")
+	}
+	if len(client.statuses) != 1 || !client.statuses[0].Successful {
+		t.Fatalf("installation results sent to the Panel: %+v, expected one successful", client.statuses)
 	}
 }
 
@@ -113,20 +129,25 @@ func TestInternalInstallReturnsInstallerError(t *testing.T) {
 	}
 }
 
-func TestInternalInstallRefusesWhileInstalling(t *testing.T) {
-	s, err := New(&hookClient{})
+func TestInstallRefusesWhileInstalling(t *testing.T) {
+	client := &hookStatusClient{}
+	s, err := New(client)
 	if err != nil {
 		t.Fatalf("New() returned unexpected error: %v", err)
 	}
+	s.Environment = &hookEnvironment{bus: events.NewBus()}
 	installer := &hookInstaller{}
 	s.installer = installer
 	s.installing.Store(true)
 
-	if err := s.internalInstall(); err == nil {
-		t.Fatal("internalInstall() returned nil while another install held the lock")
+	if err := s.Install(); err == nil {
+		t.Fatal("Install() returned nil while another install held the lock")
 	}
 	if installer.calls != 0 {
 		t.Fatalf("installer called %d times while the lock was held, expected 0", installer.calls)
+	}
+	if len(client.statuses) != 1 || client.statuses[0].Successful {
+		t.Fatalf("installation results sent to the Panel: %+v, expected one unsuccessful", client.statuses)
 	}
 }
 
