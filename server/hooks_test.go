@@ -13,24 +13,20 @@ import (
 	"github.com/pelican/wings/remote"
 )
 
-// hookClient returns a fixed installation script. Calls to any other method of
-// the embedded nil remote.Client panic.
+// hookClient returns a fixed installation script and records the install
+// statuses reported to the Panel. Calls to any other method of the embedded nil
+// remote.Client panic.
 type hookClient struct {
 	remote.Client
-	script remote.InstallationScript
+	script   remote.InstallationScript
+	statuses []remote.InstallStatusRequest
 }
 
 func (c *hookClient) GetInstallationScript(context.Context, string) (remote.InstallationScript, error) {
 	return c.script, nil
 }
 
-// hookStatusClient also records the installation results sent to the Panel.
-type hookStatusClient struct {
-	hookClient
-	statuses []remote.InstallStatusRequest
-}
-
-func (c *hookStatusClient) SetInstallationStatus(_ context.Context, _ string, r remote.InstallStatusRequest) error {
+func (c *hookClient) SetInstallationStatus(_ context.Context, _ string, r remote.InstallStatusRequest) error {
 	c.statuses = append(c.statuses, r)
 	return nil
 }
@@ -84,18 +80,29 @@ func hookServerSettings(uuid string) json.RawMessage {
 	return json.RawMessage(`{"uuid":"` + uuid + `","allocations":{"default":{"ip":"0.0.0.0","port":25565}}}`)
 }
 
-func TestInstallRunsInstallerUnderLock(t *testing.T) {
-	client := &hookStatusClient{hookClient: hookClient{script: remote.InstallationScript{ContainerImage: "installer:latest"}}}
+// newInstallHookServer returns a server that installs with installer and
+// reports its install status to the returned client.
+func newInstallHookServer(t *testing.T, installer Installer) (*Server, *hookClient) {
+	t.Helper()
+	client := &hookClient{script: remote.InstallationScript{ContainerImage: "installer:latest"}}
 	s, err := New(client)
 	if err != nil {
 		t.Fatalf("New() returned unexpected error: %v", err)
 	}
-	s.Environment = &hookEnvironment{bus: events.NewBus()}
-	installer := &hookInstaller{}
+	s.Environment = &hookEnvironment{}
 	s.installer = installer
+	return s, client
+}
 
-	if err := s.Install(); err != nil {
-		t.Fatalf("Install() returned unexpected error: %v", err)
+// TestInstallRunsInstallerUnderLock checks that install passes the Panel's
+// script to the configured installer, holds the installation lock while it runs,
+// releases the lock afterwards and reports a successful install.
+func TestInstallRunsInstallerUnderLock(t *testing.T) {
+	installer := &hookInstaller{}
+	s, client := newInstallHookServer(t, installer)
+
+	if err := s.install(false); err != nil {
+		t.Fatalf("install() returned unexpected error: %v", err)
 	}
 	if installer.calls != 1 {
 		t.Fatalf("installer called %d times, expected 1", installer.calls)
@@ -107,56 +114,50 @@ func TestInstallRunsInstallerUnderLock(t *testing.T) {
 		t.Fatal("installer ran without the installation lock held")
 	}
 	if s.IsInstalling() {
-		t.Fatal("installation lock still held after Install() returned")
+		t.Fatal("installation lock still held after install() returned")
 	}
 	if len(client.statuses) != 1 || !client.statuses[0].Successful {
-		t.Fatalf("installation results sent to the Panel: %+v, expected one successful", client.statuses)
+		t.Fatalf("install statuses = %+v, expected one successful", client.statuses)
 	}
 }
 
-func TestInstallReportsInstallerError(t *testing.T) {
-	client := &hookStatusClient{}
-	s, err := New(client)
-	if err != nil {
-		t.Fatalf("New() returned unexpected error: %v", err)
-	}
-	s.Environment = &hookEnvironment{bus: events.NewBus()}
+// TestInstallReturnsInstallerError checks that an installer error is returned,
+// reported to the Panel and the installation lock is still released.
+func TestInstallReturnsInstallerError(t *testing.T) {
 	installErr := errors.New("script failed")
-	s.installer = &hookInstaller{err: installErr}
+	s, client := newInstallHookServer(t, &hookInstaller{err: installErr})
 
-	if err := s.Install(); !errors.Is(err, installErr) {
-		t.Fatalf("Install() error = %v, expected %v", err, installErr)
+	if err := s.install(false); !errors.Is(err, installErr) {
+		t.Fatalf("install() error = %v, expected %v", err, installErr)
 	}
 	if s.IsInstalling() {
 		t.Fatal("installation lock still held after a failed install")
 	}
 	if len(client.statuses) != 1 || client.statuses[0].Successful {
-		t.Fatalf("installation results sent to the Panel: %+v, expected one unsuccessful", client.statuses)
+		t.Fatalf("install statuses = %+v, expected one unsuccessful", client.statuses)
 	}
 }
 
+// TestInstallRefusesWhileInstalling checks that install does not call the
+// installer while another installation holds the lock, and leaves that lock
+// alone.
 func TestInstallRefusesWhileInstalling(t *testing.T) {
-	client := &hookStatusClient{}
-	s, err := New(client)
-	if err != nil {
-		t.Fatalf("New() returned unexpected error: %v", err)
-	}
-	s.Environment = &hookEnvironment{bus: events.NewBus()}
 	installer := &hookInstaller{}
-	s.installer = installer
+	s, _ := newInstallHookServer(t, installer)
 	s.installing.Store(true)
 
-	if err := s.Install(); err == nil {
-		t.Fatal("Install() returned nil while another install held the lock")
+	if err := s.install(false); err == nil {
+		t.Fatal("install() returned nil while another install held the lock")
 	}
 	if installer.calls != 0 {
 		t.Fatalf("installer called %d times while the lock was held, expected 0", installer.calls)
 	}
-	if len(client.statuses) != 1 || client.statuses[0].Successful {
-		t.Fatalf("installation results sent to the Panel: %+v, expected one unsuccessful", client.statuses)
+	if !s.IsInstalling() {
+		t.Fatal("install() released a lock it did not hold")
 	}
 }
 
+// through the manager's factory and hands the manager's installer to the server.
 func TestInitServerUsesManagerHooks(t *testing.T) {
 	setHookConfig(t)
 
@@ -190,6 +191,8 @@ func TestInitServerUsesManagerHooks(t *testing.T) {
 	}
 }
 
+// TestInitServerFactoryError checks that InitServer returns the error of the
+// environment factory.
 func TestInitServerFactoryError(t *testing.T) {
 	setHookConfig(t)
 
@@ -208,6 +211,9 @@ func TestInitServerFactoryError(t *testing.T) {
 	}
 }
 
+// TestSyncWithEnvironmentConfiguresImageAndStop checks that
+// SyncWithEnvironment passes the image and stop configuration to an
+// environment implementing ImageAndStopConfigurable.
 func TestSyncWithEnvironmentConfiguresImageAndStop(t *testing.T) {
 	setHookConfig(t)
 

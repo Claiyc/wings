@@ -82,6 +82,9 @@ func newExistingTransferRouter(t *testing.T, state string, opts ...wserver.Manag
 	cfg.System.Data = filepath.Join(root, "volumes")
 	cfg.System.BackupDirectory = filepath.Join(root, "backups")
 	cfg.System.LogDirectory = filepath.Join(root, "logs")
+	// Received files are chowned to the configured user, so use the test's own.
+	cfg.System.User.Uid = os.Getuid()
+	cfg.System.User.Gid = os.Getgid()
 	config.Set(cfg)
 
 	client := existingTransferClient{mu: &sync.Mutex{}, statuses: &[]bool{}}

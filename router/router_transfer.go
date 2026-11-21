@@ -216,8 +216,6 @@ func postTransfers(c *gin.Context) {
 		trnsfr.Server = i.Server()
 	}
 
-	trnsfr.Server.SetTransferring(true)
-
 	// We add the transfer to the list of transfers once we have a server instance to use.
 	transfer.Incoming().Add(trnsfr)
 

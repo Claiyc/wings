@@ -130,6 +130,8 @@ type Installer interface {
 // a Docker container using InstallationProcess.
 type dockerInstaller struct{}
 
+// Run runs the installation script in a Docker container and blocks until it
+// has finished.
 func (dockerInstaller) Run(s *Server, script *remote.InstallationScript) error {
 	p, err := NewInstallationProcess(s, script)
 	if err != nil {
@@ -265,8 +267,6 @@ func (ip *InstallationProcess) RemoveContainer() error {
 // This will configure the required environment, and then spin up the
 // installation container. Once the container finishes installing the results
 // are stored in an installation log in the server's configuration directory.
-//
-// The caller must hold the server's installation lock (see Server.Install).
 func (ip *InstallationProcess) Run() error {
 	if err := ip.BeforeExecute(); err != nil {
 		return err

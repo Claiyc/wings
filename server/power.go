@@ -71,13 +71,14 @@ func (s *Server) LockForIncomingTransfer() (release func(), err error) {
 	if err := s.powerLock.Acquire(); err != nil {
 		return nil, errors.Wrap(err, "server: a power action is in progress")
 	}
-	if s.Environment == nil || s.Environment.State() != environment.ProcessOfflineState {
+	switch {
+	case s.IsInstalling() || s.IsRestoring() || s.IsTransferring():
+		err = s.lifecycleBusyError()
+	case s.Environment == nil || s.Environment.State() != environment.ProcessOfflineState:
 		err = ErrIsRunning
-	}
-	// StartTransferring checks and sets the lifecycle flags together, so an
-	// install or restore cannot start between the check and the mark.
-	if err == nil && !s.StartTransferring() {
-		err = s.lifecycleError()
+	case !s.StartTransferring():
+		// An install or restore started after the checks above.
+		err = s.lifecycleBusyError()
 	}
 	if err != nil {
 		s.powerLock.Release()
@@ -86,9 +87,9 @@ func (s *Server) LockForIncomingTransfer() (release func(), err error) {
 	return s.powerLock.Release, nil
 }
 
-// lifecycleError returns the error for the lifecycle operation (install,
-// restore or transfer) the server is busy with.
-func (s *Server) lifecycleError() error {
+// lifecycleBusyError returns the error for the lifecycle operation that is in
+// progress on the server, once StartTransferring has refused to start.
+func (s *Server) lifecycleBusyError() error {
 	switch {
 	case s.IsInstalling():
 		return ErrServerIsInstalling
